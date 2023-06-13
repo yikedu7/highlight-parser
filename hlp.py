@@ -1,32 +1,47 @@
 import requests
 from bs4 import BeautifulSoup
 import urllib.parse
+import fire
 
 
-def get_highlight_info(link) -> dict:
-    response = requests.get(link)
-    soup = BeautifulSoup(response.text, 'html.parser')
+class ParserWrapper(object):
 
-    title = soup.title.string
-    page_url = response.url.split('#')[0]
-    highlight_url = response.url
-    page_text = soup.get_text(separator="\n")
+    def __init__(self, link, format=None, context_range=300):
+        self.link = link
+        self.format = format
+        self.context_range = context_range
 
-    anchor = parse_anchor(highlight_url)
-    begin, end = locate_by_anchor(page_text, anchor)
-    highlight = page_text[begin:end]
-    if anchor['text'] is None:
-        context = highlight
-    else:
-        context_begin, context_end = begin, end
-        while context_begin > 0 and begin - context_begin <= 300 and page_text[context_begin] != '\n':
-            context_begin -= 1
-        while context_end < len(page_text) and context_end - end <= 300 and page_text[context_end] != '\n':
-            context_end += 1
-        context = page_text[context_begin:context_end].strip()
+    def parse(self):
+        response = requests.get(self.link)
+        soup = BeautifulSoup(response.text, 'html.parser')
 
-    return {'title': title, 'page_url': page_url, 'highlight_url': highlight_url, 'highlight': highlight,
-            'context': context}
+        title = soup.title.string
+        page_url = response.url.split('#')[0]
+        highlight_url = response.url
+        page_text = soup.get_text(separator="\n")
+
+        anchor = parse_anchor(self.link)
+        begin, end = locate_by_anchor(page_text, anchor)
+        highlight = page_text[begin:end]
+        if anchor['text'] is None:
+            context = highlight
+        else:
+            context_begin, context_end = begin, end
+            while context_begin > 0 \
+                    and begin - context_begin <= self.context_range \
+                    and page_text[context_begin] != '\n':
+                context_begin -= 1
+            while context_end < len(page_text) \
+                    and context_end - end <= self.context_range \
+                    and page_text[context_end] != '\n':
+                context_end += 1
+            context = page_text[context_begin:context_end].strip()
+
+        result = {'title': title, 'page_url': page_url, 'highlight_url': highlight_url, 'highlight': highlight,
+                  'context': context}
+        if self.format:
+            result = format_highlight_info(result, self.format)
+        return result
 
 
 def parse_anchor(link) -> dict:
@@ -63,20 +78,22 @@ def locate_by_anchor(page_text, anchor) -> tuple:
         return text_index, text_index + len(text)
 
 
-def output(highlight_info, format='markdown'):
+def format_highlight_info(highlight_info, format):
     if format == 'markdown':
         highlight = f"[**{highlight_info['highlight']}**]({highlight_info['highlight_url']})"
         context = highlight_info['context'].replace(highlight_info['highlight'], highlight)
         return f"[{highlight_info['title']}]({highlight_info['page_url']})\n\n" \
-               f"{context}\n\n" \
-               f"---\n\n"
+               f"{context}\n"
     elif format == 'html':
         highlight = f"<a href='{highlight_info['highlight_url']}'><b>{highlight_info['highlight']}</b></a>"
         context = highlight_info['context'].replace(highlight_info['highlight'], highlight)
         return f"<a href='{highlight_info['page_url']}'>{highlight_info['title']}</a><br/><br/>" \
-               f"{context}<br/><br/>" \
-               f"---<br/><br/>"
+               f"{context}<br/>"
 
 
-link = input("Enter the link to the highlight: ")
-print(output(get_highlight_info(link)))
+def main():
+    fire.Fire(ParserWrapper, name='hlp')
+
+
+if __name__ == '__main__':
+    main()
